@@ -1,18 +1,45 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <beans xmlns="http://www.springframework.org/schema/beans"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:context="http://www.springframework.org/schema/context"
     xmlns:p="http://www.springframework.org/schema/p"
     xsi:schemaLocation="http://www.springframework.org/schema/beans
-        http://www.springframework.org/schema/beans/spring-beans.xsd">
+        http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/context
+        http://www.springframework.org/schema/context/spring-context.xsd">
 	
-	<bean id="fileVisitor" class="com.trifonov.compression.ImageFileVisitor" init-method="fillFilesList" p:sourcePathName="E:\Java\Projects\file-compression-spr-xml\tinify">
-		<!--property name="sourcePathName" value="D:\trifonov\comression-file"></property-->
+	<context:property-placeholder local-override="true" location="classpath:application.properties"/>
+	
+	<bean id="reportCreator" class="com.trifonov.compression.FileReportCreator" init-method="createReportPath"
+		 p:reportDir="${report.dir}">
+	</bean> 
+	
+	<bean id="fileVisitor" class="com.trifonov.compression.ImageFileVisitor" init-method="fillFilesList"
+		p:sourceDir="${source.dir}"
+		p:failReadingFile="${fail.reading.files.file}"
+		p:reportCreator-ref="reportCreator"
+		destroy-method="walkReport">
+		<!--property name="sourcePathName" value=""></property-->
 	</bean>
 	
-	<bean id="reportCreator" class="com.trifonov.compression.FileReportCreator" init-method="createReportPath" p:reportDir="report-tinypng"></bean>   
+	  
    
-   	<bean id="compressor" class="com.trifonov.compression.UltimateCompressor" init-method="init"  p:imageFileVisitor-ref="fileVisitor" p:threadCount = "5" p:keysFileName="keys.txt"
+   	<!--bean id="compressor" class="com.trifonov.compression.UltimateCompressor" init-method="init"  p:imageFileVisitor-ref="fileVisitor" p:threadCount = "5" p:keysFileName="keys.txt"
    		p:reportCreator-ref="reportCreator"
-   		destroy-method="compressionReport"></bean>
+   		destroy-method="compressionReport"></bean-->
+   		
+   	<bean id="compressor" class="com.trifonov.compression.RelocatingCompressor" init-method="init" 
+   		p:imageFileVisitor-ref="fileVisitor"
+   		p:threadCount = "${thread.count}"
+   		p:compressionCycles = "${compression.cycles}"
+   		p:keysFileName="${keys.file}"
+   		p:resultDirName="${result.dir}"
+   		p:reportCreator-ref="reportCreator"
+   		p:countCompressingFile="${count.compressing.file}"
+   		p:failedFilesFile="${fail.files.file}"
+   		p:failedKeysFile="${fail.keys.file}"
+   		p:filesByKeyFile="${files.by.key.file}"
+   		destroy-method="compressionReport"></bean>	
+   
    
 </beans>

@@ -45,6 +45,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 */
 import lombok.Data;
 
+/**
+ * Класс для сжатия файлов. При исчерпании лимита по ключам запрашивает новые ключи и продолжает сжатие файлов.
+ * @author Alexandr Trifonov
+ *
+ */
 @Data
 public class UltimateCompressor implements Compressor {
 	
@@ -52,11 +57,17 @@ public class UltimateCompressor implements Compressor {
 	 * Количество потоков для сжатия файлов.
 	 */
 	private int threadCount = 10;
+	
 	private final Logger logger = LogManager.getLogger();
 	
-	//private String sourcePathName;
+	/**
+	 * Имя файла со списком ключей.
+	 */
 	private String keysFileName;
 	
+	/**
+	 * Объект для создания отчетов в виде текстовых файлов.
+	 */
 	private FileReportCreator reportCreator;
 	
 	/**
@@ -66,7 +77,7 @@ public class UltimateCompressor implements Compressor {
 	/**
 	 * Очередь с файлами для сжатия.
 	 */
-	private Deque<FileInfo> targetFiles;
+	private Queue<FileInfo> targetFiles;
 	/**
 	 * Очередь с файлами, которые не удалось сжать.
 	 */
@@ -75,10 +86,8 @@ public class UltimateCompressor implements Compressor {
 	 * Очередь с несжатыми файлами.
 	 */
 	private Queue<FileInfo> uncompressedFiles;
-	/**
-	 * Список с файлами к которым не был получен доступ.
-	 */
-	//private List<FileInfo> failedReadFilesList;
+	
+	
 	/**
 	 * Очередь с битыми ключами.
 	 */
@@ -92,14 +101,25 @@ public class UltimateCompressor implements Compressor {
 	 */
 	private Queue<String> incompleteKeys;		
 	
+	/**
+	 * Объект для получения списка сжимаемых файлов.
+	 */
 	private ImageFileVisitor imageFileVisitor;
 	
+	/**
+	 * Path со сжатыми файлами.
+	 */
 	private Path compressedFileDirectory;
+	
+	/**
+	 * Директория, в которой запускается jar файл приложения.
+	 */
 	private Path currentPathAbs;
 	
+	//init-method.
 	private void init() {
 		countCompressed = new AtomicInteger(0);
-		targetFiles = new ConcurrentLinkedDeque<>(imageFileVisitor.getTargetList());
+		targetFiles = new ConcurrentLinkedQueue<>(imageFileVisitor.getSourceFiles());
 		failedCompressedFiles = new ConcurrentLinkedQueue<>();
 		uncompressedFiles = new ConcurrentLinkedQueue<>();
 		failedKeys = new ConcurrentLinkedQueue<>();
@@ -124,6 +144,9 @@ public class UltimateCompressor implements Compressor {
         return (WatchEvent<T>)event;
     }
 	
+	/**
+	 * Метод для сжатия файлов. После использования каждого ключа до его лимита сжимаемых файлов, запрашивает новое количество файлов пока не будут сжаты все файлы.
+	 */
 	@Override
 	public void compress() {		
 		
@@ -139,6 +162,7 @@ public class UltimateCompressor implements Compressor {
 			
 			boolean keysIsEmpty = keys.isEmpty();
 			
+			//запрос на добавление новых ключей в файл с ключами.
 			while(keysIsEmpty) {
 				System.out.printf("Need %d keys%n", countLastFiles/500 + 1);
 				
@@ -147,6 +171,7 @@ public class UltimateCompressor implements Compressor {
 					Path path = Paths.get("D:\\trifonov\\tinify");			
 					path.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
 					WatchKey key;
+					//прослушивание директории для получения события об изменении.
 					try {				
 						boolean addedKeys = false;
 						while(!addedKeys) {
@@ -191,7 +216,7 @@ public class UltimateCompressor implements Compressor {
 		}
 	}
 	
-	
+	//непосредственный метод для выполнения сжатия.
 	private void compressionRun(List<String> keys, ExecutorService pool) {
 		
 		Iterator<String> keyIterator = keys.iterator();	
@@ -204,29 +229,27 @@ public class UltimateCompressor implements Compressor {
 					if (!targetFiles.isEmpty()) {				
 						FileInfo fileInfo = targetFiles.poll();
 						try {
-							Source  source = Tinify.fromFile(fileInfo.getName());							
-							source.toFile(fileInfo.getName());							
+							Source  source = Tinify.fromFile(fileInfo.getPath().toString());							
+							source.toFile(fileInfo.getPath().toString());							
 							countCompressed.incrementAndGet();
-							logger.info("Compressed file = {}, old size = {}", fileInfo.getName(),  fileInfo.getSize());
+							logger.info("Compressed file = {}, old size = {}", fileInfo.getPath(),  fileInfo.getSize());
 						} catch (AccountException e) {
 							wasteKeys.add(key);							
-							//uncompressedFiles.add(fileInfo);				
-							targetFiles.addFirst(fileInfo);							
+							uncompressedFiles.add(fileInfo);		
 							validKeyAndHasFile = false;
-							logger.error("AccountException, message = {}, key = {}, file = {}, size = {}", e.getMessage(), key, fileInfo.getName(), fileInfo.getSize(), e);
+							logger.error("AccountException, message = {}, key = {}, file = {}, size = {}", e.getMessage(), key, fileInfo.getPath(), fileInfo.getSize(), e);
 						} catch (ClientException e) {
 							failedCompressedFiles.add(fileInfo);
-							logger.error("ClientException, message = {}, key = {}, file = {}, size = {}", e.getMessage(), key, fileInfo.getName(), fileInfo.getSize(), e);
+							logger.error("ClientException, message = {}, key = {}, file = {}, size = {}", e.getMessage(), key, fileInfo.getPath(), fileInfo.getSize(), e);
 						} catch (ServerException e) {
 							uncompressedFiles.add(fileInfo);							
-							logger.error("ServerException, message = {}, key = {}, file = {}, size = {}", e.getMessage(), key, fileInfo.getName(), fileInfo.getSize(), e);
+							logger.error("ServerException, message = {}, key = {}, file = {}, size = {}", e.getMessage(), key, fileInfo.getPath(), fileInfo.getSize(), e);
 						} catch (ConnectionException e) {
-							//uncompressedFiles.add(fileInfo);
-							targetFiles.addFirst(fileInfo);
-							logger.error("ConnectionException, message = {}, key = {}, file = {}, size = {}", e.getMessage(), key, fileInfo.getName(), fileInfo.getSize(), e);
+							uncompressedFiles.add(fileInfo);
+							logger.error("ConnectionException, message = {}, key = {}, file = {}, size = {}", e.getMessage(), key, fileInfo.getPath(), fileInfo.getSize(), e);
 						} catch (java.lang.Exception e) {
 							uncompressedFiles.add(fileInfo);
-							logger.error("java.lang.Exception, message = {}, key = {}, file = {}, size = {}", e.getMessage(), key, fileInfo.getName(), fileInfo.getSize(), e);
+							logger.error("java.lang.Exception, message = {}, key = {}, file = {}, size = {}", e.getMessage(), key, fileInfo.getPath(), fileInfo.getSize(), e);
 						}						
 					} else {
 						incompleteKeys.add(key);
@@ -248,20 +271,17 @@ public class UltimateCompressor implements Compressor {
 		List<String> keys = new LinkedList<>();
 		try {
 			Path currentPathAbs = Paths.get("").toAbsolutePath();
-			
-			//Path keysPath = Paths.get(keysPathName);
 			Path keysPath = currentPathAbs.resolve(keysFileName);
 			keys = new LinkedList<>(Files.readAllLines(keysPath, Charset.forName("UTF-8")));
 			keys.removeIf(str -> str.isEmpty());
 			logger.info("keys: {}", keys);
 		} catch (IOException e) {
 			logger.error("Failed read keys list. IOException. ", e);			
-		} catch (Exception e) {
-			logger.error("Failed read keys list. Exception. ", e);			
-		}		
+		} 	
 		return keys;
 	}
 	
+	//destroy-method
 	private void compressionReport() {
 		
 		String lineSeparator = System.lineSeparator();
@@ -282,13 +302,11 @@ public class UltimateCompressor implements Compressor {
 		
 		mapReportKey.put("incomplete-keys.txt", incompleteKeys);
 		mapReportKey.put("waste-keys.txt", wasteKeys);
-		//reportCreator.createReportNumber(countCompressed.get(),	);
 		reportCreator.writeReport(countCompressed.toString(), "count-compressed.txt");
 		
 		mapReportFileName.entrySet().forEach(e -> {
 			if (!e.getValue().isEmpty()) {
-				String report =   e.getValue().stream().map(FileInfo::getName).map(x -> x + lineSeparator).reduce("", String::concat).trim();
-				//e.getValue().stream().map(FileInfo::getName).map(x -> x + lineSeparator);
+				String report =   e.getValue().stream().map(FileInfo::getPath).map(x -> x + lineSeparator).reduce("", String::concat).trim();
 				reportCreator.writeReport(e.getKey(), report);
 			} 
 		});
@@ -306,25 +324,6 @@ public class UltimateCompressor implements Compressor {
 		
 		
 		
-		/*
-		reportCreator.createReportFileInfos(failedReadFilesList,
-				props.getProperty("failed.read.files") != null ? props.getProperty("failed.read.files") : FAILED_READ_FILES);
-		reportCreator.createReportFileInfos(uncompressedFiles, 
-				props.getProperty("uncompressed.files.file") != null ? props.getProperty("uncompressed.files.file") : UNCOMPRESSED_FILES);
-		reportCreator.createReportFileInfos(failedCompressedFiles, 
-				props.getProperty("failed.compressed.files.file") != null ? props.getProperty("failed.compressed.files.file") : FAILED_COMPRESSED_FILES);
-		reportCreator.createReportStrings(failedKeys, 
-				props.getProperty("failed.keys.file") != null ? props.getProperty("failed.keys.file") : FAILED_KEYS);
-		reportCreator.createReportStrings(incompleteKeys,
-				props.getProperty("incomplete.keys.file") != null ? props.getProperty("incomplete.keys.file") : INCOMPLETE_KEYS);
-		reportCreator.createReportStrings(wasteKeys, 
-				props.getProperty("waste.key.files") != null ? props.getProperty("waste.key.files") : WASTE_KEYS);
-		reportCreator.createFileInfoJson(failedReadFilesList,
-				props.getProperty("failed.read.files.json") != null ? props.getProperty("failed.read.files.json") : FAILED_READ_FILES_JSON);
-		reportCreator.createFileInfoJson(uncompressedFiles, 
-				props.getProperty("uncompressed.files.json") != null ? props.getProperty("uncompressed.files.json") : UNCOMPRESSED_FILES_JSON);
-		reportCreator.createFileInfoJson(failedCompressedFiles, 
-				props.getProperty("failed.compressed.files.json") != null ? props.getProperty("failed.compressed.files.json") : FAILED_COMPRESSED_JSON);
-				*/
+		
 	}
 }
